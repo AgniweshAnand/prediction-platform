@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sports Betting Stream Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #c9d1d9; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+  </style>
+</head>
+<body class="p-4 md:p-6 min-h-screen flex flex-col justify-between">
+  <div class="max-w-5xl mx-auto w-full space-y-4">
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-[#30363d] pb-3">
+      <div>
+        <h1 class="text-base font-semibold text-white tracking-tight flex items-center gap-2">
+          <span id="dot" class="w-2 h-2 rounded-full bg-neutral-600"></span>
+          Live Match Stream Engine
+        </h1>
+        <p class="text-xs text-[#8b949e]">Real-time ingestion &bull; <span class="mono">custom_bets.csv</span> &rarr; <span class="mono">filtered.csv</span></p>
+      </div>
+      <button id="searchBtn" onclick="searchForMatches()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-1.5 rounded font-medium flex items-center gap-1.5 transition">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        Search for matches
+      </button>
+    </header>
+
+    <!-- Empty State -->
+    <div id="noMatchBox" class="panel p-6 text-center border-dashed border-[#30363d]">
+      <p class="text-sm font-medium text-white mb-1">No match available</p>
+      <p class="text-xs text-[#8b949e]">Click <strong class="text-emerald-400">"Search for matches"</strong> to scan for an active <code class="mono text-white">custom_bets.csv</code>.</p>
+    </div>
+
+    <!-- Match Card (Hidden initially) -->
+    <div id="matchCard" class="panel p-4 hidden space-y-3">
+      <div class="flex flex-wrap justify-between items-center text-xs mono border-b border-[#30363d] pb-2">
+        <div>
+          <span id="badge" class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">LIVE WINDOW</span>
+          <span id="mId" class="text-[#8b949e] ml-2"></span>
+        </div>
+        <div>TIME LEFT: <strong id="clock" class="text-white text-sm">60s</strong></div>
+      </div>
+      <div class="flex flex-wrap justify-between items-center gap-2 py-1">
+        <div class="text-base md:text-lg font-bold text-white">
+          <span id="homeName"></span> <span class="text-xs text-[#8b949e] font-normal px-1">vs</span> <span id="awayName"></span>
+        </div>
+        <div class="flex gap-2 text-xs mono">
+          <span class="px-2 py-1 bg-[#0d1117] border border-[#30363d] rounded">[1] Home Odds: <strong id="hOdds" class="text-emerald-400"></strong></span>
+          <span class="px-2 py-1 bg-[#0d1117] border border-[#30363d] rounded">[2] Away Odds: <strong id="aOdds" class="text-emerald-400"></strong></span>
+        </div>
+      </div>
+      <div class="w-full bg-[#0d1117] h-1.5 rounded-full overflow-hidden border border-[#30363d]">
+        <div id="bar" class="bg-emerald-500 h-full w-full transition-all duration-300"></div>
+      </div>
+    </div>
+
+    <!-- Main Grid: Feed & Bet Placement -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Live Feed -->
+      <div class="lg:col-span-2 panel p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex justify-between items-center text-xs border-b border-[#30363d] pb-2 mb-2">
+            <span class="font-semibold text-white uppercase tracking-wider">Live Stream Feed</span>
+            <span id="feedCount" class="mono text-[#8b949e]">0 bets</span>
+          </div>
+          <div class="grid grid-cols-12 text-[11px] mono text-[#8b949e] px-2 py-1 border-b border-[#21262d]">
+            <span class="col-span-2">S.NO</span>
+            <span class="col-span-3">USER</span>
+            <span class="col-span-4">SELECTION</span>
+            <span class="col-span-3 text-right">BID</span>
+          </div>
+          <div id="feedList" class="max-h-64 overflow-y-auto space-y-1 mt-1 text-xs mono">
+            <div id="feedEmpty" class="py-8 text-center text-[#8b949e] text-xs">No active bets streaming</div>
+          </div>
+        </div>
+        <div class="border-t border-[#30363d] pt-2 mt-3 text-[11px] text-[#8b949e] mono">Paced: 1 bid / 1.5s</div>
+      </div>
+
+      <!-- Bet Form -->
+      <div class="panel p-4 space-y-3">
+        <div class="border-b border-[#30363d] pb-2">
+          <h2 class="text-xs font-semibold text-white uppercase tracking-wider">Manual Order (<span class="mono text-emerald-400">user_me</span>)</h2>
+        </div>
+        <form id="orderForm" onsubmit="submitBet(event)" class="space-y-3">
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <button type="button" id="opt1" onclick="setSide('home')" disabled class="p-2 border border-[#30363d] rounded bg-[#0d1117] text-[#8b949e] text-left truncate cursor-not-allowed">
+              <span class="block text-[10px] text-[#8b949e] mono">[1] Home</span>
+              <strong id="btnHomeText">-</strong>
+            </button>
+            <button type="button" id="opt2" onclick="setSide('away')" disabled class="p-2 border border-[#30363d] rounded bg-[#0d1117] text-[#8b949e] text-left truncate cursor-not-allowed">
+              <span class="block text-[10px] text-[#8b949e] mono">[2] Away</span>
+              <strong id="btnAwayText">-</strong>
+            </button>
+          </div>
+          <div>
+            <label class="block text-[11px] text-[#8b949e] mb-1">Stake Amount ($)</label>
+            <input type="number" id="stakeVal" step="0.5" min="1" value="50" disabled class="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs mono text-white focus:outline-none focus:border-emerald-500 cursor-not-allowed">
+          </div>
+          <button type="submit" id="betBtn" disabled class="w-full py-2 bg-[#21262d] text-[#8b949e] rounded text-xs font-medium cursor-not-allowed transition">
+            Place Bet
+          </button>
+        </form>
+        <p id="msg" class="text-[11px] mono text-center text-[#8b949e] h-4"></p>
+      </div>
+    </div>
+
+    <!-- Settlement Section -->
+    <div id="settlePanel" class="panel p-4 hidden space-y-3">
+      <div class="flex justify-between items-center border-b border-[#30363d] pb-2">
+        <div>
+          <h3 class="text-xs font-semibold text-white uppercase tracking-wider">Settlement Ledger</h3>
+          <p class="text-[11px] text-[#8b949e]">Actual Winner: <strong id="winnerLabel" class="text-emerald-400"></strong></p>
+        </div>
+        <button onclick="downloadFilteredCsv()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded mono transition cursor-pointer">
+          &darr; Export filtered.csv
+        </button>
+      </div>
+      <div class="overflow-x-auto max-h-56">
+        <table class="w-full text-left text-xs mono">
+          <thead class="text-[#8b949e] border-b border-[#30363d] text-[11px] bg-[#0d1117]">
+            <tr>
+              <th class="py-1.5 px-2">#</th>
+              <th class="py-1.5 px-2">USER</th>
+              <th class="py-1.5 px-2">PICK</th>
+              <th class="py-1.5 px-2 text-right">STAKE</th>
+              <th class="py-1.5 px-2 text-center">OUTCOME</th>
+              <th class="py-1.5 px-2 text-right">PROFIT</th>
+            </tr>
+          </thead>
+          <tbody id="settleTable" class="divide-y divide-[#21262d]"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <footer class="text-center text-[11px] text-[#8b949e] mono mt-6">
+    Live Betting Engine &bull; Pure CSV-Driven Flow
+  </footer>
+
+  <script>
+    let rawQueue = [], streamed = [], settled = [], activeMatch = null;
+    let side = 'home', timer = 60, clockId = null, streamId = null, bettingOpen = false;
+
+    // Search for custom_bets.csv on load
+    window.addEventListener('DOMContentLoaded', searchForMatches);
+
+    async function searchForMatches() {
+      const msg = document.getElementById('msg');
+      try {
+        const res = await fetch('custom_bets.csv', { cache: 'no-store' });
+        if (!res.ok) throw new Error("File not found");
+        const txt = await res.text();
+        const rows = parseCsv(txt);
+        if (!rows.length || !rows[0].Home_Team) throw new Error("Invalid CSV format");
+        startSession(rows);
+      } catch (e) {
+        resetToEmpty();
+      }
+    }
+
+    function resetToEmpty() {
+      clearInterval(clockId);
+      clearInterval(streamId);
+      bettingOpen = false;
+      document.getElementById('noMatchBox').classList.remove('hidden');
+      document.getElementById('matchCard').classList.add('hidden');
+      document.getElementById('settlePanel').classList.add('hidden');
+      document.getElementById('dot').className = "w-2 h-2 rounded-full bg-neutral-600";
+      document.getElementById('feedEmpty').classList.remove('hidden');
+      document.getElementById('feedList').innerHTML = '<div id="feedEmpty" class="py-8 text-center text-[#8b949e] text-xs">No active bets streaming</div>';
+      toggleInputs(false);
+    }
+
+    function startSession(rows) {
+      clearInterval(clockId);
+      clearInterval(streamId);
+
+      rawQueue = [...rows];
+      streamed = [];
+      settled = [];
+      timer = 60;
+      bettingOpen = true;
+      activeMatch = rawQueue[0];
+
+      // Update UI panels
+      document.getElementById('noMatchBox').classList.add('hidden');
+      document.getElementById('matchCard').classList.remove('hidden');
+      document.getElementById('settlePanel').classList.add('hidden');
+      document.getElementById('dot').className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+      document.getElementById('feedList').innerHTML = '';
+
+      // Set match details
+      document.getElementById('mId').textContent = activeMatch.Match_ID || 'M001';
+      document.getElementById('homeName').textContent = activeMatch.Home_Team;
+      document.getElementById('awayName').textContent = activeMatch.Away_Team;
+      document.getElementById('hOdds').textContent = parseFloat(activeMatch.Home_Team_Odds || 1).toFixed(2);
+      document.getElementById('aOdds').textContent = parseFloat(activeMatch.Away_Team_Odds || 1).toFixed(2);
+      document.getElementById('btnHomeText').textContent = activeMatch.Home_Team;
+      document.getElementById('btnAwayText').textContent = activeMatch.Away_Team;
+
+      toggleInputs(true);
+      setSide('home');
+
+      // Start 60s window & live 1.5s stream
+      clockId = setInterval(tick, 1000);
+      streamId = setInterval(streamRow, 1500);
+    }
+
+    function toggleInputs(enabled) {
+      ['opt1', 'opt2', 'stakeVal', 'betBtn'].forEach(id => {
+        const el = document.getElementById(id);
+        el.disabled = !enabled;
+        el.style.cursor = enabled ? 'pointer' : 'not-allowed';
+      });
+      document.getElementById('betBtn').className = enabled
+        ? "w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium cursor-pointer transition"
+        : "w-full py-2 bg-[#21262d] text-[#8b949e] rounded text-xs font-medium cursor-not-allowed transition";
+    }
+
+    function tick() {
+      timer--;
+      document.getElementById('clock').textContent = `${timer}s`;
+      document.getElementById('bar').style.width = `${Math.max(0, (timer / 60) * 100)}%`;
+      if (timer <= 0) {
+        clearInterval(clockId);
+        clearInterval(streamId);
+        endSession();
+      }
+    }
+
+    function streamRow() {
+      if (!rawQueue.length) return;
+      const row = rawQueue.shift();
+      if (!row.User_Pick) row.User_Pick = Math.random() > 0.5 ? row.Home_Team : row.Away_Team;
+      appendFeed(row, false);
+    }
+
+    function appendFeed(row, isUser) {
+      streamed.push(row);
+      document.getElementById('feedCount').textContent = `${streamed.length} bets`;
+
+      const el = document.createElement('div');
+      el.className = `grid grid-cols-12 px-2 py-1.5 rounded items-center ${
+        isUser ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold' : 'hover:bg-[#21262d] text-[#c9d1d9]'
+      }`;
+      el.innerHTML = `
+        <span class="col-span-2 text-[#8b949e]">#${row['s.no'] || streamed.length}</span>
+        <span class="col-span-3 truncate">${row.user_id}</span>
+        <span class="col-span-4 text-[#8b949e] truncate">${row.User_Pick || row.Home_Team}</span>
+        <span class="col-span-3 text-right text-white">$${parseFloat(row.bid_amount || 0).toFixed(1)}</span>
+      `;
+      const list = document.getElementById('feedList');
+      list.insertBefore(el, list.firstChild);
+    }
+
+    function setSide(s) {
+      if (!bettingOpen) return;
+      side = s;
+      document.getElementById('opt1').className = `p-2 border rounded text-left truncate ${side === 'home' ? 'border-emerald-500/50 bg-emerald-500/10 text-white' : 'border-[#30363d] bg-[#0d1117] text-[#8b949e]'}`;
+      document.getElementById('opt2').className = `p-2 border rounded text-left truncate ${side === 'away' ? 'border-emerald-500/50 bg-emerald-500/10 text-white' : 'border-[#30363d] bg-[#0d1117] text-[#8b949e]'}`;
+    }
+
+    function submitBet(e) {
+      e.preventDefault();
+      if (!bettingOpen || !activeMatch) return;
+      const amt = parseFloat(document.getElementById('stakeVal').value);
+      if (isNaN(amt) || amt <= 0) return;
+
+      const pick = side === 'home' ? activeMatch.Home_Team : activeMatch.Away_Team;
+      const userBet = {
+        ...activeMatch,
+        "s.no": String(streamed.length + 1),
+        "user_id": "user_me",
+        "User_Pick": pick,
+        "bid_amount": amt.toFixed(1)
+      };
+      appendFeed(userBet, true);
+      document.getElementById('msg').textContent = `Placed $${amt.toFixed(1)} on ${pick}`;
+      setTimeout(() => document.getElementById('msg').textContent = "", 2500);
+    }
+
+    function endSession() {
+      bettingOpen = false;
+      toggleInputs(false);
+      document.getElementById('dot').className = "w-2 h-2 rounded-full bg-red-500";
+      document.getElementById('badge').textContent = "CLOSED";
+      document.getElementById('badge').className = "px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 font-bold";
+
+      const winner = (activeMatch.Actual_Winner || activeMatch.Home_Team).trim().toLowerCase();
+      document.getElementById('winnerLabel').textContent = activeMatch.Actual_Winner || activeMatch.Home_Team;
+      document.getElementById('settlePanel').classList.remove('hidden');
+
+      const tbody = document.getElementById('settleTable');
+      tbody.innerHTML = '';
+      settled = [];
+
+      streamed.forEach(b => {
+        const pick = (b.User_Pick || b.Home_Team).trim();
+        const stake = parseFloat(b.bid_amount || 0);
+        const odds = pick.toLowerCase() === activeMatch.Home_Team.toLowerCase()
+          ? parseFloat(activeMatch.Home_Team_Odds || 1)
+          : parseFloat(activeMatch.Away_Team_Odds || 1);
+
+        const won = pick.toLowerCase() === winner;
+        const payout = won ? +(stake * odds).toFixed(2) : 0.0;
+        const profit = won ? +(payout - stake).toFixed(2) : +(-stake).toFixed(2);
+        const res = won ? "WON" : "LOST";
+
+        settled.push({ ...b, Result: res, payout_amount: payout.toFixed(2), net_profit: profit.toFixed(2) });
+
+        const tr = document.createElement('tr');
+        tr.className = b.user_id === 'user_me' ? 'bg-emerald-500/10 font-bold' : '';
+        tr.innerHTML = `
+          <td class="py-1.5 px-2 text-[#8b949e]">${b['s.no']}</td>
+          <td class="py-1.5 px-2 text-white">${b.user_id}</td>
+          <td class="py-1.5 px-2 text-[#8b949e]">${pick}</td>
+          <td class="py-1.5 px-2 text-right text-white">$${stake.toFixed(2)}</td>
+          <td class="py-1.5 px-2 text-center"><span class="px-1 py-0.5 rounded text-[10px] ${won ? 'text-emerald-400 bg-emerald-500/20' : 'text-red-400 bg-red-500/20'}">${res}</span></td>
+          <td class="py-1.5 px-2 text-right ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${profit >= 0 ? '+' : ''}$${profit.toFixed(2)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function downloadFilteredCsv() {
+      if (!settled.length) return;
+      const cols = ["s.no", "user_id", "Match_ID", "Date", "Sport", "Home_Team", "Away_Team", "Home_Team_Odds", "Away_Team_Odds", "Draw_Odds", "Predicted_Winner", "Actual_Winner", "User_Pick", "bid_amount", "Result", "payout_amount", "net_profit"];
+      let csv = cols.join(",") + "\n";
+      settled.forEach(r => {
+        csv += cols.map(c => `"${r[c] !== undefined ? r[c] : ''}"`).join(",") + "\n";
+      });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = 'filtered.csv';
+      a.click();
+    }
+
+    function parseCsv(text) {
+      const lines = text.trim().split(/\r\n|\n/).filter(l => l.trim());
+      if (lines.length < 2) return [];
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      return lines.slice(1).map(l => {
+        const vals = l.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = vals[i] || '');
+        return obj;
+      });
+    }
+  </script>
+</body>
+</html>
